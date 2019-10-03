@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/HouzuoGuo/tiedot/benchmark"
+	"github.com/HouzuoGuo/tiedot/examples"
 	"github.com/HouzuoGuo/tiedot/httpapi"
 	"github.com/HouzuoGuo/tiedot/tdlog"
 )
@@ -77,6 +79,12 @@ func main() {
 	flag.StringVar(&jwtPrivateKey, "jwtprivatekey", "", "(HTTP JWT server) Private key for decoding tokens (empty to disable JWT)")
 
 	// Benchmark mode params
+	var (
+		// Size of benchmark sample
+		benchSize int
+		// Whether to clean up (delete benchmark DB) after benchmark
+		benchCleanup bool
+	)
 	flag.IntVar(&benchSize, "benchsize", 400000, "Benchmark sample size")
 	flag.BoolVar(&benchCleanup, "benchcleanup", true, "Whether to clean up (delete benchmark DB) after benchmark")
 	flag.Parse()
@@ -101,7 +109,7 @@ func main() {
 	if profile {
 		resultFile, err := os.Create("perf.out")
 		if err != nil {
-			tdlog.Noticef("Cannot create profiler result file %s", resultFile)
+			tdlog.Noticef("Cannot create profiler result file %v", err)
 			os.Exit(1)
 		}
 		pprof.StartCPUProfile(resultFile)
@@ -141,12 +149,12 @@ func main() {
 		httpapi.Start(dir, port, tlsCrt, tlsKey, jwtPubKey, jwtPrivateKey, bind, authToken)
 	case "example":
 		// Run embedded usage examples
-		embeddedExample()
+		examples.EmbeddedExample()
 	case "bench":
 		// Benchmark scenarios
-		benchmark()
+		benchmark.Benchmark(benchSize, benchCleanup)
 	case "bench2":
-		benchmark2()
+		benchmark.Benchmark2(benchSize, benchCleanup)
 	default:
 		flag.PrintDefaults()
 		return

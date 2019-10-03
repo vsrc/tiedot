@@ -2,9 +2,7 @@ language: go
 go_import_path: github.com/HouzuoGuo/tiedot
 sudo: false
 go:
-  - 1.9
-  - 1.8
-  - tip
+  - 1.11
 os:
   - linux
   - osx
@@ -13,6 +11,10 @@ matrix:
     - go: tip
 install:
   - go get github.com/dgrijalva/jwt-go
+  - go get bou.ke/monkey
+  - go get github.com/pkg/errors
 script:
  - go build
- - go test -v ./...
+ - bash test-and-coverage-report.sh
+after_success:
+ - bash <(curl -s https://codecov.io/bash)

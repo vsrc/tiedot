@@ -14,19 +14,27 @@ import (
 	"testing"
 	"time"
 
+	"log"
+	"reflect"
+
+	"bou.ke/monkey"
+	"github.com/HouzuoGuo/tiedot/data"
 	"github.com/HouzuoGuo/tiedot/dberr"
 )
 
-func StrHashTest(t *testing.T) {
-	strings := []string{"", " ", "abc", "123"}
+var (
+	tempDir = "./tmp"
+)
+
+func TestStrHash(t *testing.T) {
+	listStr := []string{"", " ", "abc", "123"}
 	hashes := []int{0, 32, 417419622498, 210861491250}
-	for i := range strings {
-		if StrHash(strings[i]) != hashes[i] {
-			t.Fatalf("Hash of %s equals to %d, it should equal to %d", strings[i], StrHash(strings[i]), hashes[i])
+	for i := range listStr {
+		if StrHash(listStr[i]) != hashes[i] {
+			t.Fatalf("Hash of %s equals to %d, it should equal to %d", listStr[i], StrHash(listStr[i]), hashes[i])
 		}
 	}
 }
-
 func GetInTest(t *testing.T) {
 	var obj interface{}
 	// Get inside a JSON object
@@ -88,7 +96,6 @@ func GetInTest(t *testing.T) {
 		t.Fatal()
 	}
 }
-
 func idxHas(col *Col, path []string, idxVal interface{}, docID int) error {
 	idxName := strings.Join(path, INDEX_PATH_SEP)
 	hashKey := StrHash(fmt.Sprint(idxVal))
@@ -98,7 +105,6 @@ func idxHas(col *Col, path []string, idxVal interface{}, docID int) error {
 	}
 	return nil
 }
-
 func idxHasNot(col *Col, path []string, idxVal, docID int) error {
 	idxName := strings.Join(path, INDEX_PATH_SEP)
 	hashKey := StrHash(fmt.Sprint(idxVal))
@@ -110,7 +116,6 @@ func idxHasNot(col *Col, path []string, idxVal, docID int) error {
 	}
 	return nil
 }
-
 func TestDocCrudAndIdx(t *testing.T) {
 	os.RemoveAll(TEST_DATA_DIR)
 	defer os.RemoveAll(TEST_DATA_DIR)
@@ -282,7 +287,6 @@ func TestDocCrudAndIdx(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
 func TestUpdateFunc(t *testing.T) {
 	fatalIf := func(err error) {
 		if err != nil {
@@ -373,7 +377,6 @@ func TestUpdateFunc(t *testing.T) {
 	err = db.Close()
 	fatalIf(err)
 }
-
 func TestUpdate(t *testing.T) {
 	fatalIf := func(err error) {
 		if err != nil {
@@ -414,4 +417,389 @@ func TestUpdate(t *testing.T) {
 
 	err = db.Close()
 	fatalIf(err)
+}
+func TestGetInTypeСonversionErr(t *testing.T) {
+	GetIn("typeError", []string{})
+}
+func TestGetInPathIsEpmty(t *testing.T) {
+	if len(GetIn(map[string]interface{}{}, []string{"a", "b", "c"})) != 0 {
+		t.Error("Expected value is empty")
+	}
+}
+func TestColInsertRecoveryMarshalJsErr(t *testing.T) {
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+
+	col, _ := OpenCol(db, "test")
+	errMessage := "Error json marshal"
+	patch := monkey.Patch(json.Marshal, func(v interface{}) ([]byte, error) {
+		return nil, errors.New(errMessage)
+	})
+	defer patch.Unpatch()
+	col.InsertRecovery(0, map[string]interface{}{"test": "fail json"})
+}
+func TestColInsertRecoveryInsertErr(t *testing.T) {
+	var (
+		part *data.Partition
+	)
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+
+	col, _ := OpenCol(db, "test")
+	errMessage := "Insert error"
+	patch := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Insert", func(_ *data.Partition, id int, data []byte) (physID int, err error) {
+		return 0, errors.New(errMessage)
+	})
+	defer patch.Unpatch()
+
+	if col.InsertRecovery(0, map[string]interface{}{"test": "fail json"}).Error() != errMessage {
+		t.Errorf("Expected error : %s", errMessage)
+	}
+}
+func TestInsertErr(t *testing.T) {
+	var part *data.Partition
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+
+	col, _ := OpenCol(db, "test")
+	errMessage := "Insert error"
+	patch := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Insert", func(_ *data.Partition, id int, data []byte) (physID int, err error) {
+		return 0, errors.New(errMessage)
+	})
+	defer patch.Unpatch()
+
+	if _, err := col.Insert(map[string]interface{}{"test": "fail json"}); err.Error() != errMessage {
+		t.Errorf("Expected error : %s", errMessage)
+	}
+}
+func TestInsertJsMarshalErr(t *testing.T) {
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+
+	col, _ := OpenCol(db, "test")
+	errMessage := "Error json marshal"
+	patch := monkey.Patch(json.Marshal, func(v interface{}) ([]byte, error) {
+		return nil, errors.New(errMessage)
+	})
+	defer patch.Unpatch()
+	if _, err := col.Insert(map[string]interface{}{"test": "fail json"}); err.Error() != errMessage {
+		t.Errorf("Expected error : %s", errMessage)
+	}
+}
+func TestUpdateDocIsNill(t *testing.T) {
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+
+	col, _ := OpenCol(db, "test")
+
+	if col.Update(0, nil).Error() != fmt.Sprintf("Updating %d: input doc may not be nil", 0) {
+		t.Error("Expected error input map is nill")
+	}
+}
+func TestUpdateJsMarshalErr(t *testing.T) {
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+
+	col, _ := OpenCol(db, "test")
+	errMessage := "Error json marshal"
+	patch := monkey.Patch(json.Marshal, func(v interface{}) ([]byte, error) {
+		return nil, errors.New(errMessage)
+	})
+	defer patch.Unpatch()
+	if col.Update(0, map[string]interface{}{"test": "fail json"}).Error() != errMessage {
+		t.Errorf("Expected error : %s", errMessage)
+	}
+}
+func TestUpdatePartError(t *testing.T) {
+	var part *data.Partition
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+
+	col, _ := OpenCol(db, "test")
+	errMessage := "Update error"
+	patchUpdate := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Update", func(_ *data.Partition, id int, data []byte) (err error) {
+		return errors.New(errMessage)
+	})
+	patchRead := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Read", func(_ *data.Partition, id int) ([]byte, error) {
+		return []byte{}, nil
+	})
+	defer patchUpdate.Unpatch()
+	defer patchRead.Unpatch()
+
+	if col.Update(0, map[string]interface{}{"test": "fail json"}).Error() != errMessage {
+		t.Errorf("Expected error : %s", errMessage)
+	}
+}
+func TestUpdateAttemptDoc(t *testing.T) {
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+
+	col, _ := OpenCol(db, "test")
+	var (
+		part *data.Partition
+		buf  bytes.Buffer
+	)
+	log.SetOutput(&buf)
+	patchUpdate := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Update", func(_ *data.Partition, id int, data []byte) (err error) {
+		return nil
+	})
+	patchRead := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Read", func(_ *data.Partition, id int) ([]byte, error) {
+		return []byte{}, nil
+	})
+	patchUnmarshalJs := monkey.Patch(json.Unmarshal, func(data []byte, v interface{}) error {
+		return nil
+	})
+	defer patchUpdate.Unpatch()
+	defer patchRead.Unpatch()
+	defer patchUnmarshalJs.Unpatch()
+	col.Update(0, map[string]interface{}{"test": "fail json"})
+
+	if !strings.Contains(buf.String(), "Will not attempt to unindex document") {
+		t.Error("Expected log")
+	}
+}
+func TestUpdateBytesFunc(t *testing.T) {
+	var part *data.Partition
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+	errMessage := "error read"
+	col, _ := OpenCol(db, "test")
+	patchRead := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Read", func(_ *data.Partition, id int) ([]byte, error) {
+		return nil, errors.New(errMessage)
+	})
+	defer patchRead.Unpatch()
+	if col.UpdateBytesFunc(0, func(origDoc []byte) (newDoc []byte, err error) {
+		return []byte{}, nil
+	}).Error() != errMessage {
+		t.Errorf("expected error message %s", errMessage)
+	}
+}
+func TestUpdateBytesCallbackError(t *testing.T) {
+	var part *data.Partition
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+	errMessage := "error update"
+	col, _ := OpenCol(db, "test")
+	patchRead := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Read", func(_ *data.Partition, id int) ([]byte, error) {
+		return nil, nil
+	})
+	defer patchRead.Unpatch()
+	if col.UpdateBytesFunc(0, func(origDoc []byte) (newDoc []byte, err error) {
+		return []byte{}, errors.New(errMessage)
+	}).Error() != errMessage {
+		t.Errorf("expected error message %s", errMessage)
+	}
+}
+func TestUpdateBytesJsMarshalErr(t *testing.T) {
+	var part *data.Partition
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+	errMessage := "error update"
+	col, _ := OpenCol(db, "test")
+	patchRead := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Read", func(_ *data.Partition, id int) ([]byte, error) {
+		return nil, nil
+	})
+	patchMarshal := monkey.Patch(json.Unmarshal, func(data []byte, v interface{}) error {
+		return errors.New(errMessage)
+	})
+	defer patchRead.Unpatch()
+	defer patchMarshal.Unpatch()
+	if col.UpdateBytesFunc(0, func(origDoc []byte) (newDoc []byte, err error) {
+		return []byte{}, nil
+	}).Error() != errMessage {
+		t.Errorf("expected error message %s", errMessage)
+	}
+}
+func TestUpdateBytesPartUpdateErr(t *testing.T) {
+	var part *data.Partition
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+	errMessage := "error update"
+	col, _ := OpenCol(db, "test")
+	patchRead := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Read", func(_ *data.Partition, id int) ([]byte, error) {
+		return nil, nil
+	})
+	patchMarshal := monkey.Patch(json.Unmarshal, func(data []byte, v interface{}) error {
+		return nil
+	})
+	patchUpdate := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Update", func(_ *data.Partition, id int, data []byte) (err error) {
+		return errors.New(errMessage)
+	})
+	defer patchRead.Unpatch()
+	defer patchMarshal.Unpatch()
+	defer patchUpdate.Unpatch()
+	if col.UpdateBytesFunc(0, func(origDoc []byte) (newDoc []byte, err error) {
+		return []byte{}, nil
+	}).Error() != errMessage {
+		t.Errorf("expected error message %s", errMessage)
+	}
+}
+func TestUpdateBytesFuncIsLog(t *testing.T) {
+	var (
+		part *data.Partition
+		str  bytes.Buffer
+	)
+	log.SetOutput(&str)
+
+	db, _ := OpenDB(tempDir)
+
+	defer os.RemoveAll(tempDir)
+	//errMessage := "error update"
+	col, _ := OpenCol(db, "test")
+	patchRead := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Read", func(_ *data.Partition, id int) ([]byte, error) {
+		return nil, nil
+	})
+	patchMarshal := monkey.Patch(json.Unmarshal, func(data []byte, v interface{}) error {
+		v = nil
+		return nil
+	})
+	patchUpdate := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Update", func(_ *data.Partition, id int, data []byte) (err error) {
+		return nil
+	})
+
+	patchUnlock := monkey.PatchInstanceMethod(reflect.TypeOf(part), "UnlockUpdate", func(_ *data.Partition, id int) {
+		return
+	})
+
+	defer patchRead.Unpatch()
+	defer patchUnlock.Unpatch()
+	defer patchMarshal.Unpatch()
+	defer patchUpdate.Unpatch()
+
+	col.UpdateBytesFunc(0, func(origDoc []byte) (newDoc []byte, err error) {
+		return []byte{}, nil
+	})
+	if !strings.Contains(str.String(), "Will not attempt to unindex document") {
+		t.Error("Expected message log")
+	}
+}
+func TestUpdateFuncDocNotExistError(t *testing.T) {
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+	col, _ := OpenCol(db, "test")
+	err := col.UpdateFunc(0, func(origDoc map[string]interface{}) (newDoc map[string]interface{}, err error) {
+		return nil, nil
+	})
+
+	if err.Error() != "Document `0` does not exist" {
+		t.Error("Expected error document not exist")
+	}
+}
+func TestUpdateFuncUnmarshalError(t *testing.T) {
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+	col, _ := OpenCol(db, "test")
+	id, _ := col.Insert(map[string]interface{}{"test": "test"})
+
+	errMessage := "Error json marshal"
+	patchMarshal := monkey.Patch(json.Unmarshal, func(data []byte, v interface{}) error {
+		return errors.New(errMessage)
+	})
+	defer patchMarshal.Unpatch()
+
+	err := col.UpdateFunc(id, func(origDoc map[string]interface{}) (newDoc map[string]interface{}, err error) {
+		return nil, nil
+	})
+
+	if err.Error() != errMessage {
+		t.Error("Expected error json marshaling")
+	}
+}
+func TestUpdateFuncMarshalError(t *testing.T) {
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+	col, _ := OpenCol(db, "test")
+	id, _ := col.Insert(map[string]interface{}{"test": "test"})
+
+	errMessage := "Error json marshal"
+	patchMarshal := monkey.Patch(json.Marshal, func(v interface{}) ([]byte, error) {
+		return nil, errors.New(errMessage)
+	})
+	defer patchMarshal.Unpatch()
+
+	err := col.UpdateFunc(id, func(origDoc map[string]interface{}) (newDoc map[string]interface{}, err error) {
+		return nil, nil
+	})
+
+	if err.Error() != errMessage {
+		t.Error("Expected error json marshaling")
+	}
+}
+func TestUpdateFuncUpdateError(t *testing.T) {
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+	col, _ := OpenCol(db, "test")
+	id, _ := col.Insert(map[string]interface{}{"test": "test"})
+
+	errMessage := "Error update"
+	err := col.UpdateFunc(id, func(origDoc map[string]interface{}) (newDoc map[string]interface{}, err error) {
+		return nil, errors.New(errMessage)
+	})
+
+	if err.Error() != errMessage {
+		t.Errorf("Expected error: %s", errMessage)
+	}
+}
+func TestUpdateFuncPartUpdateError(t *testing.T) {
+	var part *data.Partition
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+	errMessage := "Error update"
+	col, _ := OpenCol(db, "test")
+	id, _ := col.Insert(map[string]interface{}{"test": "test"})
+	patchUpdate := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Update", func(_ *data.Partition, id int, data []byte) (err error) {
+		return nil
+	})
+	defer patchUpdate.Unpatch()
+	err := col.UpdateFunc(id, func(origDoc map[string]interface{}) (newDoc map[string]interface{}, err error) {
+		return nil, errors.New(errMessage)
+	})
+
+	if err.Error() != errMessage {
+		t.Errorf("Expected error: %s", errMessage)
+	}
+}
+func TestDeleteError(t *testing.T) {
+	var part *data.Partition
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+	errMessage := "Error delete"
+	col, _ := OpenCol(db, "test")
+
+	id, _ := col.Insert(map[string]interface{}{"test": "test"})
+	patchUpdate := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Delete", func(_ *data.Partition, id int) (err error) {
+		return errors.New(errMessage)
+	})
+	defer patchUpdate.Unpatch()
+	err := col.Delete(id)
+
+	if err.Error() != errMessage {
+		t.Errorf("Expected error: %s", errMessage)
+	}
+}
+func TestDeleteMarshalJsError(t *testing.T) {
+	var (
+		part *data.Partition
+		str  bytes.Buffer
+	)
+	log.SetOutput(&str)
+	db, _ := OpenDB(tempDir)
+	defer os.RemoveAll(tempDir)
+	errMessage := "Error json marshal"
+	col, _ := OpenCol(db, "test")
+
+	id, _ := col.Insert(map[string]interface{}{"test": "test"})
+	patchUpdate := monkey.PatchInstanceMethod(reflect.TypeOf(part), "Delete", func(_ *data.Partition, id int) (err error) {
+		return nil
+	})
+	patchMarshal := monkey.Patch(json.Unmarshal, func(data []byte, v interface{}) error {
+		return errors.New(errMessage)
+	})
+	defer patchMarshal.Unpatch()
+	defer patchUpdate.Unpatch()
+	col.Delete(id)
+
+	if !strings.Contains(str.String(), "Will not attempt to unindex document") {
+		t.Error("Expected error: message log")
+	}
 }

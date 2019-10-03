@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/HouzuoGuo/tiedot/data"
 	"github.com/HouzuoGuo/tiedot/tdlog"
 )
 
@@ -26,6 +27,7 @@ const (
 
 // Database structures.
 type DB struct {
+	Config     *data.Config
 	path       string          // Root path of database directory
 	numParts   int             // Total number of partitions
 	cols       map[string]*Col // All collections
@@ -35,7 +37,12 @@ type DB struct {
 // Open database and load all collections & indexes.
 func OpenDB(dbPath string) (*DB, error) {
 	rand.Seed(time.Now().UnixNano()) // document ID generation relies on this RNG
-	db := &DB{path: dbPath, schemaLock: new(sync.RWMutex)}
+	d, err := data.CreateOrReadConfig(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	db := &DB{Config: d, path: dbPath, schemaLock: new(sync.RWMutex)}
+	db.Config.CalculateConfigConstants()
 	return db, db.load()
 }
 
@@ -146,8 +153,6 @@ func (db *DB) Rename(oldName, newName string) error {
 		return fmt.Errorf("Collection %s does not exist", oldName)
 	} else if _, exists := db.cols[newName]; exists {
 		return fmt.Errorf("Collection %s already exists", newName)
-	} else if newName == oldName {
-		return fmt.Errorf("Old and new names are the same")
 	} else if err := db.cols[oldName].close(); err != nil {
 		return err
 	} else if err := os.Rename(path.Join(db.path, oldName), path.Join(db.path, newName)); err != nil {
@@ -286,6 +291,8 @@ func (db *DB) Dump(dest string) error {
 			if err != nil {
 				return err
 			}
+			_ = destFile.Close()
+			_ = src.Close()
 			tdlog.Noticef("Dump: copied file %s, size is %d", destPath, written)
 		}
 		return nil
